@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Tower Defense Didático</title>
+
+<style>
+body{
+  margin:0;
+  font-family:Arial;
+  background:#4fc3f7;
+  display:flex;
+}
+#panel{
+  width:260px;
+  padding:12px;
+  background:#0277bd;
+  color:#fff;
+}
+button{
+  width:100%;
+  padding:8px;
+  margin-top:6px;
+  border:none;
+  border-radius:10px;
+  font-weight:bold;
+  cursor:pointer;
+}
+#game{
+  position:relative;
+  width:600px;
+  height:600px;
+  background:#b3e5fc;
+  display:grid;
+  grid-template-columns:repeat(10,1fr);
+  grid-template-rows:repeat(10,1fr);
+}
+.cell{border:1px solid #81d4fa;}
+.path{background:#ffe082;}
+
+/* TORRE */
+.tower{
+  position:relative;
+  width:100%;
+  height:100%;
+}
+.tower-base{
+  position:absolute;
+  bottom:6px;
+  left:6px;
+  width:38px;
+  height:18px;
+  background:#455a64;
+  border-radius:6px;
+}
+.tower-gun{
+  position:absolute;
+  bottom:22px;
+  left:24px;
+  width:6px;
+  height:20px;
+  background:#263238;
+  border-radius:3px;
+  transform-origin:bottom center;
+  transition:transform .1s linear;
+}
+
+/* TORRE UPGRADES VISUAIS */
+.tower.lv4 .tower-base{background:#37474f;}
+.tower.lv4 .tower-gun{height:24px;}
+
+.tower.lv7 .tower-base{background:#263238;width:44px;}
+.tower.lv7 .tower-gun{height:28px;width:8px;}
+
+/* INIMIGOS */
+.enemy{position:absolute;border-radius:30%;}
+.normal{background:crimson;width:26px;height:26px;}
+.boss{background:black;width:46px;height:46px;}
+
+/* BALAS */
+.bullet{
+  position:absolute;
+  width:6px;
+  height:6px;
+  background:#fff;
+  border-radius:50%;
+}
+
+/* BARRA DO BOSS */
+#bossBar{
+  position:absolute;
+  top:10px;
+  left:50%;
+  transform:translateX(-50%);
+  width:400px;
+  height:18px;
+  background:#333;
+  border-radius:10px;
+  display:none;
+}
+#bossLife{
+  height:100%;
+  width:100%;
+  background:red;
+  border-radius:10px;
+}
+
+/* MENU UPGRADE */
+#upgradeMenu{
+  position:absolute;
+  background:#fff;
+  color:#000;
+  padding:8px;
+  border-radius:10px;
+  display:none;
+  z-index:10;
+  box-shadow:0 4px 10px rgba(0,0,0,.3);
+}
+#upgradeMenu button{
+  width:100%;
+  margin-top:4px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="panel">
+  <h3>🛡️ Tower Defense</h3>
+  <p>❤️ Vida: <span id="life">10</span></p>
+  <p>💰 Dinheiro: <span id="money">150</span></p>
+  <p>🌊 Onda: <span id="wave">1</span></p>
+  <button onclick="buildTower()">Construir Torre</button>
+</div>
+
+<div id="game">
+  <div id="bossBar"><div id="bossLife"></div></div>
+</div>
+
+<div id="upgradeMenu"></div>
+
+<script>
+const game=document.getElementById("game");
+const upgradeMenu=document.getElementById("upgradeMenu");
+const bossBar=document.getElementById("bossBar");
+const bossLifeEl=document.getElementById("bossLife");
+
+let life=10,money=150,wave=1,building=false;
+const towers=[],enemies=[],bullets=[];
+
+/* SONS */
+const audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+function playSound(f,d){
+  const o=audioCtx.createOscillator();
+  o.connect(audioCtx.destination);
+  o.frequency.value=f;
+  o.start();
+  o.stop(audioCtx.currentTime+d);
+}
+
+/* CAMINHO */
+const pathIndexes=[0,1,2,3,4,14,24,34,44,54,64,74,84,94];
+const path=[];
+
+for(let i=0;i<100;i++){
+  const c=document.createElement("div");
+  c.className="cell";
+  if(pathIndexes.includes(i))c.classList.add("path");
+  game.appendChild(c);
+}
+
+pathIndexes.forEach(i=>{
+  const cell=game.children[i];
+  path.push({
+    x:cell.offsetLeft+cell.offsetWidth/2,
+    y:cell.offsetTop+cell.offsetHeight/2
+  });
+});
+
+/* TORRES */
+function buildTower(){building=true;}
+
+game.onclick=e=>{
+  if(!building||!e.target.classList.contains("cell")||e.target.classList.contains("path"))return;
+
+  const tEl=document.createElement("div");
+  tEl.className="tower";
+  tEl.innerHTML=`<div class="tower-base"></div><div class="tower-gun"></div>`;
+  e.target.appendChild(tEl);
+
+  const tower={
+    x:e.target.offsetLeft+30,
+    y:e.target.offsetTop+30,
+    damage:1,
+    rate:800,
+    range:120,
+    level:1,
+    last:0,
+    el:tEl,
+    gun:tEl.querySelector(".tower-gun")
+  };
+
+  tEl.onclick=ev=>{
+    ev.stopPropagation();
+    openUpgradeMenu(tower);
+  };
+
+  towers.push(tower);
+  building=false;
+};
+
+/* UPGRADES */
+function openUpgradeMenu(t){
+  upgradeMenu.style.display="block";
+  upgradeMenu.style.left=(t.x+600)+"px";
+  upgradeMenu.style.top=t.y+"px";
+  upgradeMenu.innerHTML=`
+    <b>Torre nível ${t.level}/10</b>
+    <button onclick="upgrade('d',${towers.indexOf(t)})">➕ Dano</button>
+    <button onclick="upgrade('r',${towers.indexOf(t)})">⚡ Velocidade</button>
+    <button onclick="upgrade('a',${towers.indexOf(t)})">🎯 Alcance</button>
+  `;
+}
+
+function upgrade(type,i){
+  const t=towers[i];
+  if(t.level>=10||money<30)return;
+  money-=30;
+  t.level++;
+
+  if(type==='d')t.damage++;
+  if(type==='r')t.rate=Math.max(200,t.rate-120);
+  if(type==='a')t.range+=15;
+
+  if(t.level>=4)t.el.classList.add("lv4");
+  if(t.level>=7)t.el.classList.add("lv7");
+
+  document.getElementById("money").textContent=money;
+  upgradeMenu.style.display="none";
+}
+
+/* INIMIGOS */
+function spawnEnemy(isBoss=false){
+  let hp=6,speed=0.6,size=26,type="normal";
+  if(isBoss){
+    hp=60;speed=0.3;size=46;type="boss";
+    bossBar.style.display="block";
+    bossLifeEl.style.width="100%";
+    playSound(120,.5);
+  }
+  const el=document.createElement("div");
+  el.className="enemy "+type;
+  game.appendChild(el);
+  enemies.push({el,x:path[0].x,y:path[0].y,i:0,hp,maxHp:hp,speed,size,isBoss});
+}
+
+/* LOOP */
+function loop(time){
+  enemies.forEach((e,i)=>{
+    const t=path[e.i+1];
+    if(!t){e.el.remove();enemies.splice(i,1);life--;return;}
+    const dx=t.x-e.x,dy=t.y-e.y,d=Math.hypot(dx,dy);
+    e.x+=(dx/d)*e.speed;
+    e.y+=(dy/d)*e.speed;
+    if(d<e.speed)e.i++;
+    e.el.style.left=(e.x-e.size/2)+"px";
+    e.el.style.top=(e.y-e.size/2)+"px";
+  });
+
+  towers.forEach(t=>{
+    if(time-t.last<t.rate)return;
+    const e=enemies.find(en=>Math.hypot(t.x-en.x,t.y-en.y)<t.range);
+    if(e){
+      t.last=time;
+      playSound(700,.05);
+
+      const angle=Math.atan2(e.y-t.y,e.x-t.x)*180/Math.PI+90;
+      t.gun.style.transform=`rotate(${angle}deg)`;
+
+      const b=document.createElement("div");
+      b.className="bullet";
+      game.appendChild(b);
+      bullets.push({b,x:t.x,y:t.y,e,damage:t.damage});
+    }
+  });
+
+  bullets.forEach((b,i)=>{
+    const dx=b.e.x-b.x,dy=b.e.y-b.y,d=Math.hypot(dx,dy);
+    b.x+=(dx/d)*4;b.y+=(dy/d)*4;
+    if(d<6){
+      b.e.hp-=b.damage;
+      if(b.e.isBoss)bossLifeEl.style.width=(b.e.hp/b.e.maxHp*100)+"%";
+      if(b.e.hp<=0){
+        playSound(200,.1);
+        if(b.e.isBoss)bossBar.style.display="none";
+        b.e.el.remove();
+        enemies.splice(enemies.indexOf(b.e),1);
+        money+=10;
+        document.getElementById("money").textContent=money;
+      }
+      b.b.remove();bullets.splice(i,1);
+    }
+    b.b.style.left=b.x+"px";
+    b.b.style.top=b.y+"px";
+  });
+
+  requestAnimationFrame(loop);
+}
+
+setInterval(()=>{
+  for(let i=0;i<wave+2;i++)setTimeout(()=>spawnEnemy(false),i*600);
+  if(wave%5===0)setTimeout(()=>spawnEnemy(true),2500);
+  wave++;
+  document.getElementById("wave").textContent=wave;
+},8000);
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
